@@ -60,7 +60,11 @@ router.delete('/:id', verifyToken, async (req, res) => {
     if (comment.authorEmail !== req.user.email)
       return res.status(403).json({ message: 'Forbidden: Not your comment' });
     await Comment.findByIdAndDelete(req.params.id);
-    await Idea.findByIdAndUpdate(comment.ideaId, [{ $set: { commentCount: { $max: [0, { $subtract: ['$commentCount', 1] }] } } }]);
+    const idea = await Idea.findById(comment.ideaId);
+    if (idea) {
+      idea.commentCount = Math.max(0, (idea.commentCount || 0) - 1);
+      await idea.save();
+    }
     res.json({ message: 'Comment deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -1,29 +1,33 @@
-const admin = require('firebase-admin');
+const { cert, getApps, initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const fs = require('fs');
 const path = require('path');
 
-function getFirebaseAdmin() {
-  if (admin.apps.length) return admin;
+function loadServiceAccount() {
+  const serviceAccountPath = path.join(__dirname, 'service-account.json');
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  if (fs.existsSync(serviceAccountPath)) return JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+  return null;
+}
+
+function getFirebaseAuth() {
   try {
-    const serviceAccountPath = path.join(__dirname, 'service-account.json');
-    const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
-      ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-      : fs.existsSync(serviceAccountPath)
-        ? JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'))
-        : null;
-    if (!serviceAccount) return null;
-    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-    return admin;
+    if (!getApps().length) {
+      const serviceAccount = loadServiceAccount();
+      if (!serviceAccount) return null;
+      initializeApp({ credential: cert(serviceAccount) });
+    }
+    return getAuth();
   } catch (error) {
-    console.error('Firebase Admin could not initialize:', error.message);
+    console.error('Firebase Admin could not initialize:', error.code || error.message);
     return null;
   }
 }
 
 async function verifyFirebaseIdToken(idToken) {
-  const firebaseAdmin = getFirebaseAdmin();
-  if (!firebaseAdmin) throw new Error('Firebase Admin is not configured');
-  return firebaseAdmin.auth().verifyIdToken(idToken);
+  const firebaseAuth = getFirebaseAuth();
+  if (!firebaseAuth) throw new Error('Firebase Admin is not configured');
+  return firebaseAuth.verifyIdToken(idToken);
 }
 
-module.exports = { verifyFirebaseIdToken };
+module.exports = { verifyFirebaseIdToken, getFirebaseAuth };
