@@ -7,7 +7,7 @@ const verifyToken = require('../middleware/verifyToken');
 // GET /api/ideas - all ideas with search & filter
 router.get('/', async (req, res) => {
   try {
-    const { search, category, startDate, endDate, page = 1, limit = 12 } = req.query;
+    const { search, category, startDate, endDate, sort = 'newest', page = 1, limit = 12 } = req.query;
     const query = {};
     if (search) query.title = { $regex: search, $options: 'i' };
     if (category && category !== 'All') query.category = category;
@@ -16,13 +16,20 @@ router.get('/', async (req, res) => {
       if (startDate) query.createdAt.$gte = new Date(startDate);
       if (endDate) query.createdAt.$lte = new Date(endDate);
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 12));
+    const skip = (safePage - 1) * safeLimit;
+    const sortOptions = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      discussed: { commentCount: -1, createdAt: -1 },
+    };
     const total = await Idea.countDocuments(query);
     const ideas = await Idea.find(query)
-      .sort({ createdAt: -1 })
+      .sort(sortOptions[sort] || sortOptions.newest)
       .skip(skip)
-      .limit(parseInt(limit));
-    res.json({ ideas, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) });
+      .limit(safeLimit);
+    res.json({ ideas, total, page: safePage, totalPages: Math.ceil(total / safeLimit) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -65,7 +72,15 @@ router.get('/:id', async (req, res) => {
 // POST /api/ideas - create idea (protected)
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const idea = new Idea({ ...req.body, authorEmail: req.user.email });
+    const { title, shortDescription, detailedDescription, category, tags, imageURL, estimatedBudget, targetAudience, problemStatement, proposedSolution } = req.body;
+    const idea = new Idea({
+      title, shortDescription, detailedDescription, category, tags, imageURL, estimatedBudget,
+      targetAudience, problemStatement, proposedSolution,
+      authorId: req.user.email,
+      authorEmail: req.user.email,
+      authorName: req.user.name || 'Anonymous',
+      authorPhoto: req.user.photo || '',
+    });
     const saved = await idea.save();
     res.status(201).json(saved);
   } catch (err) {
@@ -80,7 +95,9 @@ router.put('/:id', verifyToken, async (req, res) => {
     if (!idea) return res.status(404).json({ message: 'Idea not found' });
     if (idea.authorEmail !== req.user.email)
       return res.status(403).json({ message: 'Forbidden: Not your idea' });
-    const updated = await Idea.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const allowedFields = ['title', 'shortDescription', 'detailedDescription', 'category', 'tags', 'imageURL', 'estimatedBudget', 'targetAudience', 'problemStatement', 'proposedSolution'];
+    const updates = Object.fromEntries(allowedFields.filter((field) => field in req.body).map((field) => [field, req.body[field]]));
+    const updated = await Idea.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
     res.json(updated);
   } catch (err) {
     res.status(400).json({ message: err.message });
